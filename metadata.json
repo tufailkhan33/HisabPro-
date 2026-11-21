@@ -1,0 +1,6 @@
+{
+  "name": "HisabPro",
+  "description": "Professional Credit, Digital Khata, Shop, Booker & Recovery Management System for Pakistan (PKR).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

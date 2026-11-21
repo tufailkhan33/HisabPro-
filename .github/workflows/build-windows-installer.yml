@@ -1,0 +1,109 @@
+name: Build HisabPro Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21 (x64)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Install NSIS 3.x
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          $nsisBin = "C:\Program Files (x86)\NSIS"
+          if (Test-Path $nsisBin) {
+            "$nsisBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Run Shared & Desktop JVM Tests on Windows
+        run: gradle :shared:test :desktopApp:test --console=plain
+
+      - name: Build Self-Contained Windows x64 Distributable
+        run: gradle :desktopApp:createDistributable --console=plain
+
+      - name: Verify Native Runtime Dependencies in Distributable
+        shell: pwsh
+        run: |
+          $distDir = "desktopApp\build\compose\binaries\main\app\HisabPro"
+          if (-not (Test-Path "$distDir\HisabPro.exe")) { throw "HisabPro.exe missing from distributable!" }
+          if (-not (Test-Path "$distDir\runtime\bin\java.dll")) { throw "Bundled Windows JRE runtime missing!" }
+          if (-not (Test-Path "$distDir\app")) { throw "Application JAR payload directory missing!" }
+          Get-ChildItem $distDir
+
+      - name: Compile HisabPro_Setup.exe (NSIS Installer)
+        shell: pwsh
+        run: |
+          makensis desktopApp\installer\HisabPro.nsi
+          if (-not (Test-Path "desktopApp\installer\HisabPro_Setup.exe")) {
+            throw "HisabPro_Setup.exe was not generated."
+          }
+
+      - name: Stage Clean HisabPro_Windows_Release Folder & Compress ZIP (No Android Files)
+        shell: pwsh
+        run: |
+          $releaseDir = "HisabPro_Windows_Release"
+          if (Test-Path $releaseDir) { Remove-Item -Recurse -Force $releaseDir }
+          New-Item -ItemType Directory -Path $releaseDir | Out-Null
+
+          Copy-Item "desktopApp\installer\HisabPro_Setup.exe" "$releaseDir\HisabPro_Setup.exe"
+          Copy-Item "desktopApp\installer\README.txt" "$releaseDir\README.txt"
+          Copy-Item "desktopApp\installer\LICENSE.txt" "$releaseDir\LICENSE.txt"
+
+          # Verify genuine Windows PE header ("MZ")
+          $bytes = [System.IO.File]::ReadAllBytes("$releaseDir\HisabPro_Setup.exe")
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw "Generated HisabPro_Setup.exe is missing valid Windows PE MZ signature!"
+          }
+
+          if (Test-Path "HisabPro_Windows_Complete.zip") { Remove-Item -Force "HisabPro_Windows_Complete.zip" }
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "HisabPro_Windows_Complete.zip" -CompressionLevel Optimal
+
+          # Verify ZIP contents exclude all Android/source files
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("$PWD\HisabPro_Windows_Complete.zip")
+          $entries = $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+          Write-Host "ZIP Entries:"
+          $entries | ForEach-Object { Write-Host " - $_" }
+          $forbidden = $entries | Where-Object { $_ -match "\.apk$|\.kt$|\.java$|android|gradle" }
+          if ($forbidden) { throw "Forbidden Android/source files detected in release ZIP: $forbidden" }
+
+          Get-Item "HisabPro_Windows_Complete.zip"
+
+      - name: Test Silent Install & Uninstall Smoke Check on Windows Runner
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "HisabPro_Windows_Release\HisabPro_Setup.exe" -ArgumentList "/S" -Wait
+          $installedExe = "$env:ProgramFiles\HisabPro\HisabPro.exe"
+          if (-not (Test-Path $installedExe)) {
+            throw "Silent install verification failed: $installedExe missing!"
+          }
+          if (-not (Test-Path "$env:ProgramFiles\HisabPro\runtime\bin\java.dll")) {
+            throw "Installed Windows runtime missing!"
+          }
+          Start-Process -FilePath "$env:ProgramFiles\HisabPro\uninstall.exe" -ArgumentList "/S" -Wait
+
+      - name: Upload HisabPro_Windows_Complete.zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HisabPro_Windows_Complete
+          path: HisabPro_Windows_Complete.zip
+          retention-days: 30

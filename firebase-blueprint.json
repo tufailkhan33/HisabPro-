@@ -1,0 +1,502 @@
+{
+  "entities": {
+    "Business": {
+      "title": "Business",
+      "description": "Isolated business workspace for HisabPro credit and recovery operations.",
+      "type": "object",
+      "properties": {
+        "businessName": { "type": "string" },
+        "businessCode": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerMobile": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "currency": { "type": "string", "enum": ["PKR"] },
+        "timezone": { "type": "string", "enum": ["Asia/Karachi"] },
+        "allowOverRecovery": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "suspendedReason": { "type": "string" },
+        "lastActivityMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp via FieldValue.serverTimestamp()" }
+      },
+      "required": ["businessName", "businessCode", "ownerUid", "ownerName", "ownerMobile", "currency", "timezone", "allowOverRecovery", "createdAt", "updatedAt"]
+    },
+    "LoginTicket": {
+      "title": "LoginTicket",
+      "description": "Salted PBKDF2-SHA256 credential verifier keyed by businessCode__username without PII or financial data.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "businessCode": { "type": "string" },
+        "accountId": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "STAFF", "BOOKER"] },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "passwordSalt": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "mustChangePassword": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED", "INACTIVE"] },
+        "boundGoogleUid": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "sessionRevokedBeforeMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "businessName", "businessCode", "accountId", "role", "username", "fullName", "passwordSalt", "passwordHash", "mustChangePassword", "status", "boundGoogleUid", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "UserWorkspaceBookmark": {
+      "title": "UserWorkspaceBookmark",
+      "description": "Saved business workspace reference scoped under a Google user's UID.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "businessCode": { "type": "string" },
+        "lastUsername": { "type": "string" },
+        "lastRole": { "type": "string", "enum": ["SUPER_ADMIN", "STAFF", "BOOKER"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "businessName", "businessCode", "lastUsername", "lastRole", "createdAt", "updatedAt"]
+    },
+    "WorkspaceMember": {
+      "title": "WorkspaceMember",
+      "description": "Active authenticated session mapping a Google UID to a workspace account role and permissions.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "googleUid": { "type": "string" },
+        "accountId": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "STAFF", "BOOKER"] },
+        "bookerId": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED", "INACTIVE"] },
+        "claimedTicketId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "googleUid", "accountId", "username", "fullName", "role", "bookerId", "status", "claimedTicketId", "createdAt", "updatedAt"]
+    },
+    "BusinessUser": {
+      "title": "BusinessUser",
+      "description": "Super Admin or Staff user account within a business workspace.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "userCode": { "type": "string" },
+        "fullName": { "type": "string" },
+        "username": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "STAFF"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "mustChangePassword": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "userCode", "fullName", "username", "mobileNumber", "role", "status", "mustChangePassword", "createdAt", "updatedAt"]
+    },
+    "StaffPermission": {
+      "title": "StaffPermission",
+      "description": "Granular RBAC permissions for a business user account.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "userId": { "type": "string" },
+        "viewDashboard": { "type": "boolean" },
+        "viewShops": { "type": "boolean" },
+        "addShops": { "type": "boolean" },
+        "editShops": { "type": "boolean" },
+        "addCredit": { "type": "boolean" },
+        "editCredit": { "type": "boolean" },
+        "recordRecovery": { "type": "boolean" },
+        "viewRecoveryHistory": { "type": "boolean" },
+        "viewBookers": { "type": "boolean" },
+        "manageBookers": { "type": "boolean" },
+        "viewReports": { "type": "boolean" },
+        "generatePdfs": { "type": "boolean" },
+        "searchShops": { "type": "boolean" },
+        "viewActivityLogs": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "userId", "viewDashboard", "viewShops", "addShops", "editShops", "addCredit", "editCredit", "recordRecovery", "viewRecoveryHistory", "viewBookers", "manageBookers", "viewReports", "generatePdfs", "searchShops", "viewActivityLogs", "createdAt", "updatedAt"]
+    },
+    "Booker": {
+      "title": "Booker",
+      "description": "Field booker account with read-only assigned shop visibility.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "bookerCode": { "type": "string" },
+        "fullName": { "type": "string" },
+        "username": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "mustChangePassword": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "bookerCode", "fullName", "username", "mobileNumber", "status", "mustChangePassword", "createdAt", "updatedAt"]
+    },
+    "Shop": {
+      "title": "Shop",
+      "description": "Credit shop profile with immutable Shop UID and assigned Booker.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "shopUid": { "type": "string" },
+        "shopName": { "type": "string" },
+        "bookerId": { "type": "string" },
+        "bookerName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "openingCreditPaisa": { "type": "integer" },
+        "openingDateMillis": { "type": "integer" },
+        "notes": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "createdByAccountId": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "shopUid", "shopName", "bookerId", "bookerName", "ownerName", "mobileNumber", "address", "city", "openingCreditPaisa", "openingDateMillis", "isArchived", "createdByAccountId", "createdByName", "createdAt", "updatedAt"]
+    },
+    "CreditTransaction": {
+      "title": "CreditTransaction",
+      "description": "Immutable credit ledger entry or reversal in Paisa (PKR * 100).",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "txCode": { "type": "string" },
+        "shopId": { "type": "string" },
+        "shopUid": { "type": "string" },
+        "shopName": { "type": "string" },
+        "bookerId": { "type": "string" },
+        "bookerName": { "type": "string" },
+        "amountPaisa": { "type": "integer" },
+        "transactionKind": { "type": "string", "enum": ["CREDIT", "CREDIT_REVERSAL"] },
+        "relatedTxId": { "type": "string" },
+        "reason": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "description": { "type": "string" },
+        "attachmentUri": { "type": "string" },
+        "txDateMillis": { "type": "integer" },
+        "txDateFormatted": { "type": "string" },
+        "txTimeFormatted": { "type": "string" },
+        "createdByAccountId": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdByRole": { "type": "string" },
+        "dueDateMillis": { "type": "integer" },
+        "dueDateFormatted": { "type": "string" },
+        "entryTimestampMillis": { "type": "integer" },
+        "entryDateFormatted": { "type": "string" },
+        "entryTimeFormatted": { "type": "string" },
+        "syncStatus": { "type": "string" },
+        "idempotencyToken": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "txCode", "shopId", "shopUid", "shopName", "bookerId", "bookerName", "amountPaisa", "transactionKind", "txDateMillis", "txDateFormatted", "txTimeFormatted", "createdByAccountId", "createdByName", "createdByRole", "createdAt", "updatedAt"]
+    },
+    "RecoveryTransaction": {
+      "title": "RecoveryTransaction",
+      "description": "Immutable recovery payment entry, correction, or reversal in Paisa (PKR * 100).",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "txCode": { "type": "string" },
+        "shopId": { "type": "string" },
+        "shopUid": { "type": "string" },
+        "shopName": { "type": "string" },
+        "bookerId": { "type": "string" },
+        "bookerName": { "type": "string" },
+        "amountPaisa": { "type": "integer" },
+        "transactionKind": { "type": "string", "enum": ["RECOVERY", "RECOVERY_REVERSAL"] },
+        "relatedTxId": { "type": "string" },
+        "reason": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Bank Transfer", "Easypaisa", "JazzCash", "Other"] },
+        "referenceNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "txDateMillis": { "type": "integer" },
+        "txDateFormatted": { "type": "string" },
+        "txTimeFormatted": { "type": "string" },
+        "createdByAccountId": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdByRole": { "type": "string" },
+        "correctionGroupId": { "type": "string" },
+        "correctedFromTxId": { "type": "string" },
+        "originalAmountPaisa": { "type": "integer" },
+        "originalTxDateMillis": { "type": "integer" },
+        "isBackdated": { "type": "boolean" },
+        "reversedAtMillis": { "type": "integer" },
+        "reversedByAccountId": { "type": "string" },
+        "reversedByName": { "type": "string" },
+        "syncStatus": { "type": "string" },
+        "idempotencyToken": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "txCode", "shopId", "shopUid", "shopName", "bookerId", "bookerName", "amountPaisa", "transactionKind", "paymentMethod", "txDateMillis", "txDateFormatted", "txTimeFormatted", "createdByAccountId", "createdByName", "createdByRole", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only activity log entry.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "activityCode": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" },
+        "shopUid": { "type": "string" },
+        "previousValue": { "type": "string" },
+        "newValue": { "type": "string" },
+        "dateFormatted": { "type": "string" },
+        "timeFormatted": { "type": "string" },
+        "timestampMillis": { "type": "integer" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "activityCode", "userId", "username", "role", "action", "dateFormatted", "timeFormatted", "timestampMillis", "description", "createdAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Role-targeted in-app notification.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "category": { "type": "string" },
+        "targetRole": { "type": "string", "enum": ["ADMIN_STAFF", "BOOKER", "ALL"] },
+        "targetBookerId": { "type": "string" },
+        "shopUid": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "title", "message", "category", "targetRole", "targetBookerId", "isRead", "createdAt", "updatedAt"]
+    },
+    "BusinessSettings": {
+      "title": "BusinessSettings",
+      "description": "Business configuration and financial rules.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "businessAddress": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "allowOverRecovery": { "type": "boolean" },
+        "requireInvoiceNumber": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "businessName", "allowOverRecovery", "requireInvoiceNumber", "updatedBy", "createdAt", "updatedAt"]
+    },
+    "ChatGroup": {
+      "title": "ChatGroup",
+      "description": "Admin-managed team and meeting chat group with selected Staff and Bookers.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "memberAccountIds": { "type": "array", "items": { "type": "string" } },
+        "memberNames": { "type": "array", "items": { "type": "string" } },
+        "createdByAccountId": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "lastMessagePreview": { "type": "string" },
+        "lastMessageAtMillis": { "type": "integer" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "name", "memberAccountIds", "memberNames", "createdByAccountId", "createdByName", "lastMessageAtMillis", "isArchived", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Immutable group chat message supporting text, voice notes, camera photos, gallery images, and file sharing.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "senderAccountId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["TEXT", "VOICE", "IMAGE", "FILE"] },
+        "text": { "type": "string" },
+        "mediaBase64": { "type": "string" },
+        "fileName": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "durationSec": { "type": "integer" },
+        "fileSizeBytes": { "type": "integer" },
+        "sentAtMillis": { "type": "integer" },
+        "dateFormatted": { "type": "string" },
+        "timeFormatted": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "groupId", "senderAccountId", "senderName", "senderRole", "messageType", "durationSec", "fileSizeBytes", "sentAtMillis", "dateFormatted", "timeFormatted", "createdAt"]
+    },
+    "PlatformOwnerConfig": {
+      "title": "PlatformOwnerConfig",
+      "description": "Permanent Platform Owner authentication & governance record bound to verified Google identity.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "authorizedEmail": { "type": "string" },
+        "googleUid": { "type": "string" },
+        "passwordSalt": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "mustChangePassword": { "type": "boolean" },
+        "sessionRevokedBeforeMillis": { "type": "integer" },
+        "lastLoginMillis": { "type": "integer" },
+        "deviceCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "authorizedEmail", "passwordSalt", "passwordHash", "mustChangePassword", "createdAt", "updatedAt"]
+    },
+    "PlatformActivityLog": {
+      "title": "PlatformActivityLog",
+      "description": "Immutable platform-wide governance and administrative action audit trail.",
+      "type": "object",
+      "properties": {
+        "actorEmail": { "type": "string" },
+        "actorUsername": { "type": "string" },
+        "action": { "type": "string" },
+        "targetBusinessId": { "type": "string" },
+        "targetBusinessName": { "type": "string" },
+        "targetAccountId": { "type": "string" },
+        "targetUsername": { "type": "string" },
+        "details": { "type": "string" },
+        "timestampMillis": { "type": "integer" },
+        "dateFormatted": { "type": "string" },
+        "timeFormatted": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorEmail", "actorUsername", "action", "details", "timestampMillis", "createdAt"]
+    },
+    "PlatformBackupSnapshot": {
+      "title": "PlatformBackupSnapshot",
+      "description": "Platform cloud backup manifest created by Platform Owner.",
+      "type": "object",
+      "properties": {
+        "createdByEmail": { "type": "string" },
+        "totalBusinesses": { "type": "integer" },
+        "totalUsers": { "type": "integer" },
+        "totalBookers": { "type": "integer" },
+        "totalShops": { "type": "integer" },
+        "totalCreditTx": { "type": "integer" },
+        "totalRecoveryTx": { "type": "integer" },
+        "summaryJson": { "type": "string" },
+        "createdAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["createdByEmail", "createdAtMillis", "createdAt"]
+    },
+    "PlatformBackupCompanySnapshot": {
+      "title": "PlatformBackupCompanySnapshot",
+      "description": "Per-company cloud restoration snapshot stored under a backup manifest.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string" },
+        "businessCode": { "type": "string" },
+        "businessName": { "type": "string" },
+        "snapshotJson": { "type": "string" },
+        "createdAtMillis": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "snapshotJson", "createdAtMillis", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/platform_owner/{docId}": {
+      "schema": { "$ref": "#/entities/PlatformOwnerConfig" },
+      "description": "Permanent Platform Owner governance credentials (strictly bound to authorized Google email)"
+    },
+    "/platform_activity/{logId}": {
+      "schema": { "$ref": "#/entities/PlatformActivityLog" },
+      "description": "Immutable platform-wide owner activity logs"
+    },
+    "/platform_backups/{backupId}": {
+      "schema": { "$ref": "#/entities/PlatformBackupSnapshot" },
+      "description": "Platform-wide cloud backup manifests"
+    },
+    "/platform_backups/{backupId}/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/PlatformBackupCompanySnapshot" },
+      "description": "Serialized isolated company snapshot for cloud restoration"
+    },
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/Business" },
+      "description": "Business workspaces"
+    },
+    "/login_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/LoginTicket" },
+      "description": "Hashed login tickets keyed by businessCode__username"
+    },
+    "/users/{googleUid}/workspaces/{businessId}": {
+      "schema": { "$ref": "#/entities/UserWorkspaceBookmark" },
+      "description": "Saved workspaces per authenticated Google UID"
+    },
+    "/businesses/{businessId}/members/{googleUid}": {
+      "schema": { "$ref": "#/entities/WorkspaceMember" },
+      "description": "Authenticated workspace membership and active role binding"
+    },
+    "/businesses/{businessId}/users/{userId}": {
+      "schema": { "$ref": "#/entities/BusinessUser" },
+      "description": "Super Admin and Staff user profiles"
+    },
+    "/businesses/{businessId}/permissions/{userId}": {
+      "schema": { "$ref": "#/entities/StaffPermission" },
+      "description": "Per-user RBAC permission matrix"
+    },
+    "/businesses/{businessId}/bookers/{bookerId}": {
+      "schema": { "$ref": "#/entities/Booker" },
+      "description": "Field booker profiles"
+    },
+    "/businesses/{businessId}/shops/{shopId}": {
+      "schema": { "$ref": "#/entities/Shop" },
+      "description": "Credit shops within a business"
+    },
+    "/businesses/{businessId}/credit_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/CreditTransaction" },
+      "description": "Immutable credit ledger entries and reversals"
+    },
+    "/businesses/{businessId}/recovery_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/RecoveryTransaction" },
+      "description": "Immutable recovery ledger entries and reversals"
+    },
+    "/businesses/{businessId}/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Permanent append-only audit trail"
+    },
+    "/businesses/{businessId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "In-app role-scoped notifications"
+    },
+    "/businesses/{businessId}/business_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/BusinessSettings" },
+      "description": "Business-wide financial and operational settings"
+    },
+    "/businesses/{businessId}/chat_groups/{groupId}": {
+      "schema": { "$ref": "#/entities/ChatGroup" },
+      "description": "Admin-created team meeting and group chats"
+    },
+    "/businesses/{businessId}/chat_groups/{groupId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Immutable text, voice, photo, and file messages in team groups"
+    }
+  }
+}

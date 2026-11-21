@@ -1,0 +1,834 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOptString(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isOptInt(data, key) {
+      return !(key in data) || data[key] == null || data[key] is int;
+    }
+
+    function isReqString(data, key, minLen, maxLen) {
+      return data.get(key, null) is string && data[key].size() >= minLen && data[key].size() <= maxLen;
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    // --- Permanent Platform Owner (Verified Google Identity) ---
+    function isPlatformOwner() {
+      return isSignedIn() &&
+        request.auth.token.get('email', '') == 'muhammadtufailllc007@gmail.com' &&
+        request.auth.token.get('email_verified', false) == true;
+    }
+
+    // --- Business Membership & Role Helpers ---
+    function memberPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid);
+    }
+
+    function isBusinessMember(businessId) {
+      return isSignedIn() && exists(memberPath(businessId));
+    }
+
+    function memberData(businessId) {
+      return get(memberPath(businessId)).data;
+    }
+
+    function activeMemberRole(businessId) {
+      let p = memberPath(businessId);
+      let d = exists(p) ? get(p).data : null;
+      return (d != null && d.status == 'ACTIVE') ? d.role : '';
+    }
+
+    function isActiveMember(businessId) {
+      return isSignedIn() && activeMemberRole(businessId) != '';
+    }
+
+    function isBusinessActive(businessId) {
+      let bPath = /databases/$(database)/documents/businesses/$(businessId);
+      return exists(bPath) && get(bPath).data.get('status', 'ACTIVE') == 'ACTIVE';
+    }
+
+    function isBusinessAdmin(businessId) {
+      return isSignedIn() && activeMemberRole(businessId) == 'SUPER_ADMIN';
+    }
+
+    function isAdminOrStaff(businessId) {
+      return isSignedIn() && (activeMemberRole(businessId) in ['SUPER_ADMIN', 'STAFF']);
+    }
+
+    function isBookerMember(businessId) {
+      return isSignedIn() && activeMemberRole(businessId) == 'BOOKER';
+    }
+
+    function hasStaffPermission(businessId, permKey) {
+      let m = memberData(businessId);
+      let permPath = /databases/$(database)/documents/businesses/$(businessId)/permissions/$(m.accountId);
+      return m.role == 'STAFF' &&
+        exists(permPath) &&
+        get(permPath).data[permKey] == true;
+    }
+
+    function isAdminOrPermittedStaff(businessId, permKey) {
+      let p = memberPath(businessId);
+      let d = exists(p) ? get(p).data : null;
+      let permPath = /databases/$(database)/documents/businesses/$(businessId)/permissions/$(d.accountId);
+      return isSignedIn() &&
+        d != null &&
+        d.status == 'ACTIVE' &&
+        (
+          d.role == 'SUPER_ADMIN' ||
+          (d.role == 'STAFF' && exists(permPath) && get(permPath).data[permKey] == true)
+        );
+    }
+
+    // --- Validation Helpers ---
+    function isValidBusiness(data) {
+      return isReqString(data, 'businessName', 2, 100) &&
+             isReqString(data, 'businessCode', 3, 24) &&
+             isReqString(data, 'ownerUid', 1, 128) &&
+             isReqString(data, 'ownerName', 2, 80) &&
+             isReqString(data, 'ownerMobile', 7, 20) &&
+             isOptString(data, 'ownerEmail', 120) &&
+             data.currency == 'PKR' &&
+             data.timezone == 'Asia/Karachi' &&
+             data.allowOverRecovery is bool &&
+             (!('status' in data) || data.status == null || (data.status in ['ACTIVE', 'SUSPENDED'])) &&
+             isOptString(data, 'suspendedReason', 300) &&
+             isOptInt(data, 'lastActivityMillis') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidLoginTicket(data) {
+      return isReqString(data, 'businessId', 1, 128) &&
+             isReqString(data, 'businessName', 2, 100) &&
+             isReqString(data, 'businessCode', 3, 24) &&
+             isReqString(data, 'accountId', 1, 128) &&
+             (data.role in ['SUPER_ADMIN', 'STAFF', 'BOOKER']) &&
+             isReqString(data, 'username', 2, 40) &&
+             isReqString(data, 'fullName', 2, 80) &&
+             isReqString(data, 'passwordSalt', 12, 64) &&
+             isReqString(data, 'passwordHash', 20, 128) &&
+             data.mustChangePassword is bool &&
+             (data.status in ['ACTIVE', 'SUSPENDED', 'INACTIVE']) &&
+             isReqString(data, 'boundGoogleUid', 0, 128) &&
+             isReqString(data, 'ownerUid', 1, 128) &&
+             isOptInt(data, 'sessionRevokedBeforeMillis') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidWorkspaceBookmark(data) {
+      return isReqString(data, 'businessId', 1, 128) &&
+             isReqString(data, 'businessName', 2, 100) &&
+             isReqString(data, 'businessCode', 3, 24) &&
+             isReqString(data, 'lastUsername', 2, 40) &&
+             (data.lastRole in ['SUPER_ADMIN', 'STAFF', 'BOOKER']) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMember(data, businessId, googleUid) {
+      return data.businessId == businessId &&
+             data.googleUid == googleUid &&
+             isReqString(data, 'accountId', 1, 128) &&
+             isReqString(data, 'username', 2, 40) &&
+             isReqString(data, 'fullName', 2, 80) &&
+             (data.role in ['SUPER_ADMIN', 'STAFF', 'BOOKER']) &&
+             isReqString(data, 'bookerId', 0, 128) &&
+             (data.status in ['ACTIVE', 'SUSPENDED', 'INACTIVE']) &&
+             isReqString(data, 'claimedTicketId', 1, 128) &&
+             isOptInt(data, 'sessionRevokedBeforeMillis') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBusinessUser(data, businessId) {
+      return data.businessId == businessId &&
+             isReqString(data, 'userCode', 3, 30) &&
+             isReqString(data, 'fullName', 2, 80) &&
+             isReqString(data, 'username', 2, 40) &&
+             isReqString(data, 'mobileNumber', 7, 20) &&
+             isOptString(data, 'email', 120) &&
+             (data.role in ['SUPER_ADMIN', 'STAFF']) &&
+             (data.status in ['ACTIVE', 'SUSPENDED']) &&
+             data.mustChangePassword is bool &&
+             isOptInt(data, 'sessionRevokedBeforeMillis') &&
+             isOptInt(data, 'lastLoginMillis') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPermission(data, businessId, userId) {
+      return data.businessId == businessId &&
+             data.userId == userId &&
+             data.viewDashboard is bool &&
+             data.viewShops is bool &&
+             data.addShops is bool &&
+             data.editShops is bool &&
+             data.addCredit is bool &&
+             data.editCredit is bool &&
+             data.recordRecovery is bool &&
+             data.viewRecoveryHistory is bool &&
+             data.viewBookers is bool &&
+             data.manageBookers is bool &&
+             data.viewReports is bool &&
+             data.generatePdfs is bool &&
+             data.searchShops is bool &&
+             data.viewActivityLogs is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBooker(data, businessId) {
+      return data.businessId == businessId &&
+             isReqString(data, 'bookerCode', 3, 30) &&
+             isReqString(data, 'fullName', 2, 80) &&
+             isReqString(data, 'username', 2, 40) &&
+             isReqString(data, 'mobileNumber', 7, 20) &&
+             isOptString(data, 'address', 250) &&
+             isOptString(data, 'notes', 300) &&
+             (data.status in ['ACTIVE', 'INACTIVE', 'SUSPENDED']) &&
+             data.mustChangePassword is bool &&
+             isOptInt(data, 'sessionRevokedBeforeMillis') &&
+             isOptInt(data, 'lastLoginMillis') &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidShop(data, businessId) {
+      return data.businessId == businessId &&
+             isReqString(data, 'shopUid', 3, 40) &&
+             isReqString(data, 'shopName', 2, 100) &&
+             isReqString(data, 'bookerId', 1, 128) &&
+             isReqString(data, 'bookerName', 2, 80) &&
+             isReqString(data, 'ownerName', 2, 80) &&
+             isReqString(data, 'mobileNumber', 7, 20) &&
+             isReqString(data, 'address', 1, 250) &&
+             isReqString(data, 'city', 1, 80) &&
+             data.openingCreditPaisa is int &&
+             data.openingCreditPaisa >= 0 &&
+             data.openingDateMillis is int &&
+             data.openingDateMillis > 0 &&
+             isOptString(data, 'notes', 500) &&
+             data.isArchived is bool &&
+             isReqString(data, 'createdByAccountId', 1, 128) &&
+             isReqString(data, 'createdByName', 2, 80) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCreditTx(data, businessId) {
+      return data.businessId == businessId &&
+             data.amountPaisa is int &&
+             data.amountPaisa > 0 &&
+             (data.transactionKind in ['CREDIT', 'CREDIT_REVERSAL']) &&
+             data.txDateMillis is int &&
+             data.txDateMillis > 0 &&
+             isReqString(data, 'txCode', 3, 40) &&
+             isReqString(data, 'shopId', 1, 128) &&
+             isReqString(data, 'bookerId', 1, 128) &&
+             isReqString(data, 'createdByAccountId', 1, 128) &&
+             data.get('description', '') is string &&
+             data.get('description', '').size() <= 500 &&
+             data.get('reason', '') is string &&
+             data.get('reason', '').size() <= 300 &&
+             data.keys().size() <= 34 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidRecoveryTx(data, businessId) {
+      return data.businessId == businessId &&
+             data.amountPaisa is int &&
+             data.amountPaisa > 0 &&
+             (data.transactionKind in ['RECOVERY', 'RECOVERY_REVERSAL']) &&
+             (data.paymentMethod in ['Cash', 'Bank Transfer', 'Easypaisa', 'JazzCash', 'Other']) &&
+             data.txDateMillis is int &&
+             data.txDateMillis > 0 &&
+             isReqString(data, 'txCode', 3, 40) &&
+             isReqString(data, 'shopId', 1, 128) &&
+             isReqString(data, 'bookerId', 1, 128) &&
+             isReqString(data, 'createdByAccountId', 1, 128) &&
+             data.get('notes', '') is string &&
+             data.get('notes', '').size() <= 500 &&
+             data.get('reason', '') is string &&
+             data.get('reason', '').size() <= 300 &&
+             data.keys().size() <= 38 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAuditLog(data, businessId) {
+      return data.businessId == businessId &&
+             data.timestampMillis is int &&
+             data.timestampMillis > 0 &&
+             isReqString(data, 'activityCode', 3, 40) &&
+             isReqString(data, 'userId', 1, 128) &&
+             isReqString(data, 'action', 2, 80) &&
+             isReqString(data, 'description', 2, 500) &&
+             data.keys().size() <= 20 &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidNotification(data, businessId) {
+      return data.businessId == businessId &&
+             (data.targetRole in ['ADMIN_STAFF', 'BOOKER', 'ALL']) &&
+             data.isRead is bool &&
+             isReqString(data, 'title', 2, 120) &&
+             isReqString(data, 'message', 2, 500) &&
+             data.get('targetBookerId', '') is string &&
+             data.keys().size() <= 16 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBusinessSettings(data, businessId) {
+      return data.businessId == businessId &&
+             isReqString(data, 'businessName', 2, 100) &&
+             isOptString(data, 'businessAddress', 250) &&
+             isOptString(data, 'contactPhone', 20) &&
+             data.allowOverRecovery is bool &&
+             data.requireInvoiceNumber is bool &&
+             isReqString(data, 'updatedBy', 2, 80) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isChatGroupMember(businessId, groupId) {
+      let grpPath = /databases/$(database)/documents/businesses/$(businessId)/chat_groups/$(groupId);
+      return exists(grpPath) && memberData(businessId).accountId in get(grpPath).data.memberAccountIds;
+    }
+
+    function isValidChatGroup(data, businessId) {
+      return data.businessId == businessId &&
+             isReqString(data, 'name', 2, 100) &&
+             isOptString(data, 'description', 300) &&
+             data.memberAccountIds is list &&
+             data.memberAccountIds.size() <= 100 &&
+             data.memberNames is list &&
+             data.memberNames.size() <= 100 &&
+             isReqString(data, 'createdByAccountId', 1, 128) &&
+             isReqString(data, 'createdByName', 2, 80) &&
+             isOptString(data, 'lastMessagePreview', 200) &&
+             data.lastMessageAtMillis is int &&
+             data.isArchived is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidChatMessage(data, businessId, groupId) {
+      return data.businessId == businessId &&
+             data.groupId == groupId &&
+             isReqString(data, 'senderAccountId', 1, 128) &&
+             data.senderAccountId == memberData(businessId).accountId &&
+             isReqString(data, 'senderName', 2, 80) &&
+             isReqString(data, 'senderRole', 2, 30) &&
+             (data.messageType in ['TEXT', 'VOICE', 'IMAGE', 'FILE']) &&
+             isOptString(data, 'text', 2000) &&
+             isOptString(data, 'mediaBase64', 750000) &&
+             isOptString(data, 'fileName', 200) &&
+             isOptString(data, 'mimeType', 120) &&
+             data.durationSec is int &&
+             data.durationSec >= 0 &&
+             data.durationSec <= 600 &&
+             data.fileSizeBytes is int &&
+             data.fileSizeBytes >= 0 &&
+             data.sentAtMillis is int &&
+             data.sentAtMillis > 0 &&
+             isReqString(data, 'dateFormatted', 4, 40) &&
+             isReqString(data, 'timeFormatted', 4, 40) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    // --- Collection Rules ---
+
+    // 0. Permanent Platform Owner, Global Activity & Cloud Backups
+    match /platform_owner/{docId} {
+      allow get, list: if isPlatformOwner() && isValidId(docId);
+      allow create, update: if isPlatformOwner() &&
+                               docId == 'root' &&
+                               incoming().username == 'MrTufailadmin' &&
+                               incoming().authorizedEmail == 'muhammadtufailllc007@gmail.com' &&
+                               isReqString(incoming(), 'passwordSalt', 12, 64) &&
+                               isReqString(incoming(), 'passwordHash', 20, 128) &&
+                               incoming().mustChangePassword is bool &&
+                               isOptInt(incoming(), 'sessionRevokedBeforeMillis') &&
+                               isOptInt(incoming(), 'lastLoginMillis') &&
+                               isOptInt(incoming(), 'deviceCount') &&
+                               isValidTimestamp(incoming().createdAt) &&
+                               isValidTimestamp(incoming().updatedAt);
+      allow delete: if false;
+    }
+
+    match /platform_activity/{logId} {
+      allow get, list: if isPlatformOwner();
+      allow create: if isPlatformOwner() &&
+                       isValidId(logId) &&
+                       incoming().actorEmail == 'muhammadtufailllc007@gmail.com' &&
+                       incoming().actorUsername == 'MrTufailadmin' &&
+                       isReqString(incoming(), 'action', 2, 80) &&
+                       isOptString(incoming(), 'targetBusinessId', 128) &&
+                       isOptString(incoming(), 'targetBusinessName', 120) &&
+                       isOptString(incoming(), 'targetAccountId', 128) &&
+                       isOptString(incoming(), 'targetUsername', 60) &&
+                       isReqString(incoming(), 'details', 2, 500) &&
+                       incoming().timestampMillis is int &&
+                       incoming().timestampMillis > 0 &&
+                       isValidTimestamp(incoming().createdAt);
+      allow update, delete: if false;
+    }
+
+    match /platform_backups/{backupId} {
+      allow get, list: if isPlatformOwner();
+      allow create: if isPlatformOwner() &&
+                       isValidId(backupId) &&
+                       incoming().createdByEmail == 'muhammadtufailllc007@gmail.com' &&
+                       incoming().createdAtMillis is int &&
+                       incoming().createdAtMillis > 0 &&
+                       isValidTimestamp(incoming().createdAt);
+      allow update, delete: if false;
+
+      match /companies/{companyId} {
+        allow get, list: if isPlatformOwner();
+        allow create: if isPlatformOwner() &&
+                         isValidId(backupId) &&
+                         isValidId(companyId) &&
+                         incoming().businessId == companyId &&
+                         incoming().snapshotJson is string &&
+                         isValidTimestamp(incoming().createdAt);
+        allow update, delete: if false;
+      }
+    }
+
+    // 1. User Workspace Bookmarks
+    match /users/{googleUid}/workspaces/{businessId} {
+      allow get, list: if isSignedIn() && request.auth.uid == googleUid;
+      allow create: if isSignedIn() &&
+                       request.auth.uid == googleUid &&
+                       isValidId(businessId) &&
+                       isValidWorkspaceBookmark(incoming()) &&
+                       incoming().businessId == businessId;
+      allow update: if isSignedIn() &&
+                       request.auth.uid == googleUid &&
+                       isValidId(businessId) &&
+                       isValidWorkspaceBookmark(incoming()) &&
+                       incoming().businessId == existing().businessId &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && request.auth.uid == googleUid;
+    }
+
+    // 2. Salted Login Tickets (no public listing; Platform Owner has read/update governance)
+    match /login_tickets/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId);
+      allow list: if isPlatformOwner();
+      allow create: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       isValidLoginTicket(incoming()) &&
+                       (
+                         (incoming().role == 'SUPER_ADMIN' &&
+                          incoming().ownerUid == request.auth.uid &&
+                          getAfter(/databases/$(database)/documents/businesses/$(incoming().businessId)).data.ownerUid == request.auth.uid) ||
+                         isBusinessAdmin(incoming().businessId) ||
+                         (incoming().role == 'BOOKER' && isAdminOrPermittedStaff(incoming().businessId, 'manageBookers'))
+                       );
+      allow update: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       isValidLoginTicket(incoming()) &&
+                       incoming().businessId == existing().businessId &&
+                       incoming().accountId == existing().accountId &&
+                       incoming().role == existing().role &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Platform Owner password reset, status suspension, or session revocation
+                         (isPlatformOwner() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['passwordSalt', 'passwordHash', 'mustChangePassword', 'status', 'sessionRevokedBeforeMillis', 'boundGoogleUid', 'updatedAt'])) ||
+                         // Admin managing staff/booker credentials or resetting password
+                         (isBusinessAdmin(existing().businessId) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['passwordSalt', 'passwordHash', 'mustChangePassword', 'status', 'fullName', 'boundGoogleUid', 'sessionRevokedBeforeMillis', 'updatedAt'])) ||
+                         // Staff with manageBookers updating a Booker ticket
+                         (existing().role == 'BOOKER' &&
+                          isAdminOrPermittedStaff(existing().businessId, 'manageBookers') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['passwordSalt', 'passwordHash', 'mustChangePassword', 'status', 'fullName', 'boundGoogleUid', 'updatedAt'])) ||
+                         // User claiming ticket or changing own temporary/reset password
+                         ((existing().role != 'SUPER_ADMIN' || existing().ownerUid == request.auth.uid) &&
+                          (existing().boundGoogleUid == '' || existing().boundGoogleUid == request.auth.uid || existing().ownerUid == request.auth.uid) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['boundGoogleUid', 'passwordSalt', 'passwordHash', 'mustChangePassword', 'updatedAt']))
+                       );
+      allow delete: if false;
+    }
+
+    // 3. Businesses
+    match /businesses/{businessId} {
+      allow get: if isPlatformOwner() || (isSignedIn() && isValidId(businessId) && (isBusinessMember(businessId) || (resource != null && resource.data.ownerUid == request.auth.uid)));
+      allow list: if isPlatformOwner() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isSignedIn() &&
+                       isValidId(businessId) &&
+                       isValidBusiness(incoming()) &&
+                       (incoming().ownerUid == request.auth.uid || isPlatformOwner());
+      allow update: if isSignedIn() &&
+                       isValidId(businessId) &&
+                       isValidBusiness(incoming()) &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().businessCode == existing().businessCode &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         (isPlatformOwner() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'ownerName', 'ownerMobile', 'ownerEmail', 'allowOverRecovery', 'status', 'suspendedReason', 'lastActivityMillis', 'updatedAt'])) ||
+                         (isBusinessAdmin(businessId) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'ownerName', 'ownerMobile', 'ownerEmail', 'allowOverRecovery', 'lastActivityMillis', 'updatedAt']))
+                       );
+      allow delete: if false;
+
+      // 4. Workspace Members
+      match /members/{googleUid} {
+        allow get: if isPlatformOwner() || (isSignedIn() && (request.auth.uid == googleUid || isBusinessAdmin(businessId)));
+        allow list: if isPlatformOwner() || (isSignedIn() && isBusinessAdmin(businessId));
+        allow create: if isSignedIn() &&
+                         request.auth.uid == googleUid &&
+                         isValidId(googleUid) &&
+                         isValidMember(incoming(), businessId, googleUid) &&
+                         (
+                           (incoming().role == 'SUPER_ADMIN' &&
+                            getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid) ||
+                           (exists(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)) &&
+                            get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.businessId == businessId &&
+                            get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.accountId == incoming().accountId &&
+                            get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.role == incoming().role &&
+                            get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.status == 'ACTIVE' &&
+                            (get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.role != 'SUPER_ADMIN' ||
+                             get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.ownerUid == request.auth.uid))
+                         );
+        allow update: if isSignedIn() &&
+                         isValidId(googleUid) &&
+                         isValidMember(incoming(), businessId, googleUid) &&
+                         (
+                           (isPlatformOwner() &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'sessionRevokedBeforeMillis', 'updatedAt'])) ||
+                           (request.auth.uid == googleUid &&
+                            (
+                              (incoming().role == 'SUPER_ADMIN' &&
+                               getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid) ||
+                              (exists(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)) &&
+                               get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.businessId == businessId &&
+                               get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.accountId == incoming().accountId &&
+                               get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.role == incoming().role &&
+                               get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.status == 'ACTIVE' &&
+                               (get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.role != 'SUPER_ADMIN' ||
+                                get(/databases/$(database)/documents/login_tickets/$(incoming().claimedTicketId)).data.ownerUid == request.auth.uid))
+                            ))
+                         );
+        allow delete: if false;
+      }
+
+      // 5. Users (Super Admin & Staff)
+      match /users/{userId} {
+        allow get, list: if isPlatformOwner() || (isActiveMember(businessId) && isAdminOrStaff(businessId));
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidBusinessUser(incoming(), businessId) &&
+                         (
+                           isPlatformOwner() ||
+                           (incoming().role == 'SUPER_ADMIN' &&
+                            getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid) ||
+                           (incoming().role == 'STAFF' && isBusinessActive(businessId) && isBusinessAdmin(businessId))
+                         );
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidBusinessUser(incoming(), businessId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().userCode == existing().userCode &&
+                         incoming().role == existing().role &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           isPlatformOwner() ||
+                           isBusinessAdmin(businessId) ||
+                           (isActiveMember(businessId) &&
+                            memberData(businessId).accountId == userId &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['mustChangePassword', 'lastLoginMillis', 'updatedAt']))
+                         );
+        allow delete: if isBusinessAdmin(businessId) && existing().role != 'SUPER_ADMIN';
+      }
+
+      // 6. Permissions
+      match /permissions/{userId} {
+        allow get, list: if isPlatformOwner() || (isActiveMember(businessId) && isAdminOrStaff(businessId));
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidPermission(incoming(), businessId, userId) &&
+                         (
+                           isPlatformOwner() ||
+                           getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid ||
+                           isBusinessAdmin(businessId)
+                         );
+        allow update: if (isPlatformOwner() || isBusinessAdmin(businessId)) &&
+                         isValidId(userId) &&
+                         isValidPermission(incoming(), businessId, userId) &&
+                         incoming().createdAt == existing().createdAt;
+        allow delete: if isBusinessAdmin(businessId);
+      }
+
+      // 7. Bookers
+      match /bookers/{bookerId} {
+        allow get: if isPlatformOwner() || (isActiveMember(businessId) &&
+                      (isAdminOrStaff(businessId) || (isBookerMember(businessId) && memberData(businessId).bookerId == bookerId)));
+        allow list: if isPlatformOwner() || (isActiveMember(businessId) && isAdminOrStaff(businessId));
+        allow create: if (isPlatformOwner() ||
+                          (isBusinessActive(businessId) && isAdminOrPermittedStaff(businessId, 'manageBookers'))) &&
+                         isValidId(bookerId) &&
+                         isValidBooker(incoming(), businessId);
+        allow update: if isSignedIn() &&
+                         isValidId(bookerId) &&
+                         isValidBooker(incoming(), businessId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().bookerCode == existing().bookerCode &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           isPlatformOwner() ||
+                           isAdminOrPermittedStaff(businessId, 'manageBookers') ||
+                           (isBookerMember(businessId) &&
+                            memberData(businessId).bookerId == bookerId &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['mustChangePassword', 'lastLoginMillis', 'updatedAt']))
+                         );
+        allow delete: if isBusinessAdmin(businessId);
+      }
+
+      // 8. Shops
+      match /shops/{shopId} {
+        allow get: if isPlatformOwner() || (isActiveMember(businessId) &&
+                      (isAdminOrStaff(businessId) || (isBookerMember(businessId) && existing().bookerId == memberData(businessId).bookerId)));
+        allow list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                       (isAdminOrStaff(businessId) || (isBookerMember(businessId) && resource.data.bookerId == memberData(businessId).bookerId)));
+        allow create: if (isPlatformOwner() ||
+                          (isBusinessActive(businessId) && isAdminOrPermittedStaff(businessId, 'addShops'))) &&
+                         isValidId(shopId) &&
+                         isValidShop(incoming(), businessId);
+        allow update: if (isPlatformOwner() ||
+                          (isBusinessActive(businessId) && isAdminOrPermittedStaff(businessId, 'editShops'))) &&
+                         isValidId(shopId) &&
+                         isValidShop(incoming(), businessId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().shopUid == existing().shopUid &&
+                         incoming().createdAt == existing().createdAt;
+        allow delete: if isBusinessAdmin(businessId);
+      }
+
+      // 9. Credit Transactions (Immutable financial ledger)
+      match /credit_transactions/{txId} {
+        allow get: if isPlatformOwner() || (isActiveMember(businessId) &&
+                      (isAdminOrStaff(businessId) || (isBookerMember(businessId) && existing().bookerId == memberData(businessId).bookerId)));
+        allow list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                       (isAdminOrStaff(businessId) || (isBookerMember(businessId) && resource.data.bookerId == memberData(businessId).bookerId)));
+        allow create: if isValidId(txId) &&
+                         isValidCreditTx(incoming(), businessId) &&
+                         (
+                           isPlatformOwner() ||
+                           (isBusinessActive(businessId) &&
+                            (
+                              (incoming().transactionKind == 'CREDIT' && isAdminOrPermittedStaff(businessId, 'addCredit')) ||
+                              (incoming().transactionKind == 'CREDIT_REVERSAL' && isAdminOrPermittedStaff(businessId, 'editCredit'))
+                            ))
+                         );
+        allow update, delete: if false;
+      }
+
+      // 10. Recovery Transactions (Immutable financial ledger; Staff cannot backdate, future-date, correct, or reverse)
+      match /recovery_transactions/{txId} {
+        allow get: if isPlatformOwner() || (isActiveMember(businessId) &&
+                      (isAdminOrStaff(businessId) || (isBookerMember(businessId) && existing().bookerId == memberData(businessId).bookerId)));
+        allow list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                       (isAdminOrStaff(businessId) || (isBookerMember(businessId) && resource.data.bookerId == memberData(businessId).bookerId)));
+        allow create: if isValidId(txId) &&
+                         isValidRecoveryTx(incoming(), businessId) &&
+                         (
+                           isPlatformOwner() ||
+                           (isBusinessActive(businessId) &&
+                            incoming().txDateMillis <= request.time.toMillis() + 43200000 &&
+                            (
+                              (incoming().transactionKind == 'RECOVERY' &&
+                               (
+                                 isBusinessAdmin(businessId) ||
+                                 (hasStaffPermission(businessId, 'recordRecovery') &&
+                                  incoming().get('isBackdated', false) == false &&
+                                  incoming().get('correctedFromTxId', '') == '' &&
+                                  incoming().get('correctionGroupId', '') == '' &&
+                                  incoming().txDateMillis >= request.time.toMillis() - 129600000)
+                               )) ||
+                              (incoming().transactionKind == 'RECOVERY_REVERSAL' && isBusinessAdmin(businessId))
+                            ))
+                         );
+        allow update, delete: if false;
+      }
+
+      // 11. Audit Logs (Append-only)
+      match /audit_logs/{logId} {
+        allow get, list: if isPlatformOwner() || isAdminOrPermittedStaff(businessId, 'viewActivityLogs');
+        allow create: if isValidId(logId) &&
+                         isValidAuditLog(incoming(), businessId) &&
+                         (
+                           isActiveMember(businessId) ||
+                           isPlatformOwner() ||
+                           getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid
+                         );
+        allow update, delete: if false;
+      }
+
+      // 12. Notifications
+      match /notifications/{notificationId} {
+        allow get: if isPlatformOwner() || (isActiveMember(businessId) &&
+                      (isAdminOrStaff(businessId) || (isBookerMember(businessId) && existing().targetBookerId == memberData(businessId).bookerId)));
+        allow list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                       (isAdminOrStaff(businessId) || (isBookerMember(businessId) && resource.data.targetBookerId == memberData(businessId).bookerId)));
+        allow create: if isValidId(notificationId) &&
+                         isValidNotification(incoming(), businessId) &&
+                         (isAdminOrStaff(businessId) || isPlatformOwner());
+        allow update: if isActiveMember(businessId) &&
+                         isValidId(notificationId) &&
+                         isValidNotification(incoming(), businessId) &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']) &&
+                         (isAdminOrStaff(businessId) || (isBookerMember(businessId) && existing().targetBookerId == memberData(businessId).bookerId));
+        allow delete: if isBusinessAdmin(businessId);
+      }
+
+      // 13. Business Settings
+      match /business_settings/{settingId} {
+        allow get, list: if isPlatformOwner() || isActiveMember(businessId);
+        allow create: if isSignedIn() &&
+                         isValidId(settingId) &&
+                         isValidBusinessSettings(incoming(), businessId) &&
+                         (
+                           isPlatformOwner() ||
+                           getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid ||
+                           isBusinessAdmin(businessId)
+                         );
+        allow update: if (isPlatformOwner() || isBusinessAdmin(businessId)) &&
+                         isValidId(settingId) &&
+                         isValidBusinessSettings(incoming(), businessId) &&
+                         incoming().createdAt == existing().createdAt;
+        allow delete: if false;
+      }
+
+      // 14. Team Group Chats & Meetings
+      match /chat_groups/{groupId} {
+        allow get, list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                              (isBusinessAdmin(businessId) || memberData(businessId).accountId in resource.data.memberAccountIds));
+        allow create: if isBusinessActive(businessId) &&
+                         isBusinessAdmin(businessId) &&
+                         isValidId(groupId) &&
+                         isValidChatGroup(incoming(), businessId);
+        allow update: if isBusinessActive(businessId) &&
+                         isActiveMember(businessId) &&
+                         isValidId(groupId) &&
+                         isValidChatGroup(incoming(), businessId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().createdByAccountId == existing().createdByAccountId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           isBusinessAdmin(businessId) ||
+                           (isChatGroupMember(businessId, groupId) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['lastMessagePreview', 'lastMessageAtMillis', 'updatedAt']))
+                         );
+        allow delete: if isBusinessAdmin(businessId);
+
+        match /messages/{messageId} {
+          allow get, list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                                (isBusinessAdmin(businessId) || isChatGroupMember(businessId, groupId)));
+          allow create: if isBusinessActive(businessId) &&
+                           isActiveMember(businessId) &&
+                           isValidId(messageId) &&
+                           (isBusinessAdmin(businessId) || isChatGroupMember(businessId, groupId)) &&
+                           isValidChatMessage(incoming(), businessId, groupId);
+          allow update, delete: if false;
+        }
+      }
+
+      // 15. Products / Inventory (Shared Android + Windows Multi-Device Catalog)
+      match /products/{productId} {
+        allow get, list: if isPlatformOwner() || isActiveMember(businessId);
+        allow create: if (isPlatformOwner() || (isBusinessActive(businessId) && isAdminOrStaff(businessId))) &&
+                         isValidId(productId) &&
+                         incoming().businessId == businessId &&
+                         isReqString(incoming(), 'sku', 1, 60) &&
+                         isReqString(incoming(), 'name', 1, 120) &&
+                         isReqString(incoming(), 'unit', 1, 40) &&
+                         incoming().unitPricePaisa is int && incoming().unitPricePaisa >= 0 &&
+                         incoming().stockQty is int && incoming().stockQty >= 0 &&
+                         incoming().reorderLevel is int && incoming().reorderLevel >= 0 &&
+                         incoming().isArchived is bool &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+        allow update: if (isPlatformOwner() || (isBusinessActive(businessId) && isAdminOrStaff(businessId))) &&
+                         isValidId(productId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isReqString(incoming(), 'sku', 1, 60) &&
+                         isReqString(incoming(), 'name', 1, 120) &&
+                         isReqString(incoming(), 'unit', 1, 40) &&
+                         incoming().unitPricePaisa is int && incoming().unitPricePaisa >= 0 &&
+                         incoming().stockQty is int && incoming().stockQty >= 0 &&
+                         incoming().reorderLevel is int && incoming().reorderLevel >= 0 &&
+                         incoming().isArchived is bool &&
+                         isValidTimestamp(incoming().updatedAt);
+        allow delete: if isBusinessAdmin(businessId);
+      }
+
+      // 16. Bookings / Orders (Bookers, Staff & Admins across Android + Windows)
+      match /bookings/{bookingId} {
+        allow get, list: if isPlatformOwner() || (isActiveMember(businessId) &&
+                              (isAdminOrStaff(businessId) || (isBookerMember(businessId) && resource.data.bookerId == memberData(businessId).bookerId)));
+        allow create: if (isPlatformOwner() || (isBusinessActive(businessId) && isActiveMember(businessId))) &&
+                         isValidId(bookingId) &&
+                         incoming().businessId == businessId &&
+                         isReqString(incoming(), 'bookingCode', 2, 40) &&
+                         isReqString(incoming(), 'shopId', 1, 128) &&
+                         isReqString(incoming(), 'productId', 1, 128) &&
+                         isReqString(incoming(), 'productName', 1, 120) &&
+                         incoming().quantity is int && incoming().quantity > 0 &&
+                         incoming().unitPricePaisa is int && incoming().unitPricePaisa >= 0 &&
+                         incoming().totalAmountPaisa is int && incoming().totalAmountPaisa >= 0 &&
+                         (incoming().status in ['BOOKED', 'DISPATCHED', 'CANCELLED']) &&
+                         incoming().bookingDateMillis is int && incoming().bookingDateMillis > 0 &&
+                         isOptString(incoming(), 'notes', 500) &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         isValidTimestamp(incoming().updatedAt);
+        allow update: if (isPlatformOwner() || (isBusinessActive(businessId) && isAdminOrStaff(businessId))) &&
+                         isValidId(bookingId) &&
+                         incoming().businessId == existing().businessId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (incoming().status in ['BOOKED', 'DISPATCHED', 'CANCELLED']) &&
+                         isValidTimestamp(incoming().updatedAt);
+        allow delete: if isBusinessAdmin(businessId);
+      }
+    }
+  }
+}

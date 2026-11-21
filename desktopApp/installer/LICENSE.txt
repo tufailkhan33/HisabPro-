@@ -1,0 +1,19 @@
+HisabPro Desktop Software License (v1.3.0)
+Copyright (c) 2026 HisabPro. All rights reserved.
+
+This software and associated installer (HisabPro_Setup.exe) are licensed
+for authorized business operations using HisabPro multi-device workspaces.
+
+Permitted Use:
+- Install and run HisabPro Desktop on authorized Windows 10 and Windows 11
+  (64-bit) workstations connected to your licensed HisabPro company workspace.
+- Create local backups of your workspace ledgers, PDF statements, Excel
+  workbooks, and SQLite snapshots for your business records.
+
+Restrictions:
+- You may not decompile, reverse engineer, extract embedded runtime modules
+  for redistribution, or bypass role-based access and audit protections.
+
+Warranty Disclaimer:
+This software is provided "as is", without warranty of any kind, express or
+implied. Always maintain regular workspace backups alongside cloud sync.

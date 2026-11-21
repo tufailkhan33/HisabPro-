@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="pdf_reports" path="reports/" />
+    <cache-path name="chat_camera" path="chat_camera/" />
+    <cache-path name="chat_media" path="chat_media/" />
+    <files-path name="exported_files" path="exports/" />
+    <files-path name="downloads" path="downloads/" />
+</paths>
